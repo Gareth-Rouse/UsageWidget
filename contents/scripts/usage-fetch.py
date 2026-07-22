@@ -150,8 +150,7 @@ def map_usage_windows(report, now_ms):
 
         resets_at = win.get("resetsAt")
         if resets_at is not None:
-            detail = "{}% used, resets {}".format(
-                round(pct), relative(resets_at, now_ms))
+            detail = "{}% used".format(round(pct))
         else:
             detail = "{} / {} {}".format(
                 amount.get("used", 0), amount.get("limit", 0),
@@ -167,14 +166,14 @@ def map_usage_windows(report, now_ms):
     return windows
 
 
-def long_default_window(windows):
-    """Primary = first window that is NOT the rolling 5h window.
+def five_hour_default_window(windows):
+    """Primary = the rolling 5h window when present, else the first window.
 
-    The 5h window is surfaced separately as the compact widget's second
-    number, so the headline defaults to the longer-term window (7d / weekly).
+    OpenAI/Anthropic headline the short-term 5-hour burn; the longer window is
+    surfaced as the compact widget's second number.
     """
     for w in windows:
-        if not (FIVE_HOUR_RE.search(w["id"]) or FIVE_HOUR_RE.search(w["label"])):
+        if FIVE_HOUR_RE.search(w["id"]) or FIVE_HOUR_RE.search(w["label"]):
             return w["id"]
     return windows[0]["id"] if windows else ""
 
@@ -210,9 +209,9 @@ def main():
     reports = usage_data.get("reports", []) if usage_data else []
 
     for key, label, prov_name, default_fn, missing_msg in (
-        ("openai", "OpenAI", "openai-codex", long_default_window,
+        ("openai", "OpenAI", "openai-codex", five_hour_default_window,
          "no openai-codex usage"),
-        ("anthropic", "Anthropic", "anthropic", long_default_window,
+        ("anthropic", "Anthropic", "anthropic", five_hour_default_window,
          "no anthropic usage"),
     ):
         report = None if usage_error else find_report(reports, prov_name)

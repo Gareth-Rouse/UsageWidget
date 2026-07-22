@@ -96,6 +96,22 @@ PlasmoidItem {
         return undefined
     }
 
+    // The complementary window shown as the compact second number: when the
+    // primary is the 5h window, this is the first non-5h window; otherwise it
+    // is the 5h window. Undefined when there is nothing sensible to pair.
+    function secondaryWindow(provider) {
+        if (!provider || !provider.ok || !provider.windows) return undefined
+        var prim = root.defaultWindow(provider)
+        var primId = prim ? prim.id : ""
+        if (primId === "5h") {
+            for (var i = 0; i < provider.windows.length; i++) {
+                if (provider.windows[i].id !== "5h") return provider.windows[i]
+            }
+            return undefined
+        }
+        return root.fiveHourWindow(provider)
+    }
+
     // Compact reset string for the panel: '26d' / '3h' / '12m' / '' (null).
     function fmtResetShort(ms) {
         if (ms === null || ms === undefined || typeof ms !== "number" || isNaN(ms)) return ""
@@ -356,6 +372,18 @@ PlasmoidItem {
         id: compactRoot
         readonly property bool horizontal: Plasmoid.formFactor === PlasmaCore.Types.Horizontal
 
+        // Font sizes derived from the allocated thickness so the two stacked
+        // rows (primary line + reset) always fit inside the panel cell.
+        readonly property int primaryPx: Math.max(8, Math.round(horizontal ? height * 0.48 : Kirigami.Units.gridUnit * 0.9))
+        readonly property int secondPx: Math.max(7, Math.round(primaryPx * 0.75))
+
+        // Report the content's natural size so the panel allocates the right
+        // width (horizontal) / height (vertical) and nothing overflows.
+        implicitWidth: compactLoader.item ? compactLoader.item.implicitWidth : height * 3
+        implicitHeight: compactLoader.item ? compactLoader.item.implicitHeight : Kirigami.Units.gridUnit * 2
+        Layout.preferredWidth: implicitWidth
+        Layout.preferredHeight: implicitHeight
+
         Loader {
             id: compactLoader
             anchors.fill: parent
@@ -374,8 +402,7 @@ PlasmoidItem {
     Component {
         id: rowComp
         RowLayout {
-            spacing: 2
-            anchors.fill: parent
+            spacing: Kirigami.Units.smallSpacing * 2
             Repeater {
                 model: root.providerOrder
                 delegate: segmentDelegateComp
@@ -387,7 +414,6 @@ PlasmoidItem {
         id: columnComp
         ColumnLayout {
             spacing: 0
-            anchors.fill: parent
             Repeater {
                 model: root.providerOrder
                 delegate: segmentDelegateComp
@@ -396,7 +422,8 @@ PlasmoidItem {
     }
 
     // A compact segment per provider: letter + primary %, the 5-hour usage as a
-    // second number, and the primary window's reset time below.
+    // second number, and the primary window's reset time below. Fonts scale to
+    // the panel via compactRoot.primaryPx / secondPx.
     Component {
         id: segmentDelegateComp
 
@@ -408,18 +435,19 @@ PlasmoidItem {
 
             readonly property var provider: root.findProvider(seg.modelData)
             readonly property var win: root.defaultWindow(seg.provider)
-            readonly property var five: root.fiveHourWindow(seg.provider)
+            readonly property var second: root.secondaryWindow(seg.provider)
             readonly property bool bad: !root.loading && (!seg.provider || seg.provider.ok === false)
 
             // Primary line: letter + primary % + 5-hour %.
             RowLayout {
-                spacing: 2
+                spacing: Kirigami.Units.smallSpacing
                 Layout.alignment: Qt.AlignHCenter
 
                 PlasmaComponents.Label {
                     text: root.providerCodes[seg.modelData] || "?"
                     color: seg.bad ? Kirigami.Theme.disabledTextColor : Kirigami.Theme.textColor
                     font.bold: true
+                    font.pixelSize: compactRoot.primaryPx
                 }
                 PlasmaComponents.Label {
                     text: {
@@ -431,13 +459,16 @@ PlasmoidItem {
                            ? Kirigami.Theme.disabledTextColor
                            : root.usedColor(seg.win.usedPercent || 0, true)
                     font.bold: true
+                    font.pixelSize: compactRoot.primaryPx
                 }
                 PlasmaComponents.Label {
-                    visible: !root.loading && !seg.bad
-                    text: seg.five ? ("5h " + Math.round(seg.five.usedPercent || 0) + "%") : "5h —"
-                    color: seg.five ? root.usedColor(seg.five.usedPercent || 0, true)
-                                    : Kirigami.Theme.disabledTextColor
-                    font.pixelSize: root.smallFontSize
+                    visible: !root.loading && !seg.bad && seg.second !== undefined
+                    text: seg.second
+                          ? (seg.second.id + " " + Math.round(seg.second.usedPercent || 0) + "%")
+                          : ""
+                    color: seg.second ? root.usedColor(seg.second.usedPercent || 0, true)
+                                      : Kirigami.Theme.disabledTextColor
+                    font.pixelSize: compactRoot.secondPx
                 }
             }
 
@@ -448,7 +479,7 @@ PlasmoidItem {
                 text: (seg.win && root.fmtResetShort(seg.win.resetsAt))
                       ? ("⟳ " + root.fmtResetShort(seg.win.resetsAt)) : ""
                 color: Kirigami.Theme.disabledTextColor
-                font.pixelSize: root.smallFontSize
+                font.pixelSize: compactRoot.secondPx
             }
         }
     }
