@@ -88,27 +88,30 @@ def fetch_synthetic(now_ms):
 
     windows = []
 
-    # monthly <- subscription
+    # monthly <- weeklyTokenLimit credit pool. This is the meaningful monthly
+    # subscription burn ($ of the plan's credit allowance used); the separate
+    # request counter stays ~0 for token-based usage, so it is not the headline.
+    wk = data.get("weeklyTokenLimit", {})
+    pct_rem = wk.get("percentRemaining")
+    windows.append({
+        "id": "monthly",
+        "label": "Monthly",
+        "usedPercent": round1(100.0 - pct_rem) if pct_rem is not None else 0.0,
+        "resetsAt": iso_to_ms(wk["nextRegenAt"]) if wk.get("nextRegenAt") else None,
+        "detail": "{} of {} left".format(
+            wk.get("remainingCredits", "?"), wk.get("maxCredits", "?")),
+    })
+
+    # requests <- subscription request counter (kept for the tooltip)
     sub = data.get("subscription", {})
     m_requests = sub.get("requests", 0)
     m_limit = sub.get("limit", 0)
     windows.append({
-        "id": "monthly",
-        "label": "Monthly",
+        "id": "requests",
+        "label": "Requests",
         "usedPercent": safe_pct(m_requests, m_limit),
         "resetsAt": iso_to_ms(sub["renewsAt"]) if sub.get("renewsAt") else None,
         "detail": "{} / {} requests".format(m_requests, m_limit),
-    })
-
-    # weekly <- weeklyTokenLimit
-    wk = data.get("weeklyTokenLimit", {})
-    windows.append({
-        "id": "weekly",
-        "label": "Weekly credits",
-        "usedPercent": round1(100.0 - wk.get("percentRemaining", 100.0)),
-        "resetsAt": iso_to_ms(wk["nextRegenAt"]) if wk.get("nextRegenAt") else None,
-        "detail": "{} of {} left".format(
-            wk.get("remainingCredits", "?"), wk.get("maxCredits", "?")),
     })
 
     # 5h <- rollingFiveHourLimit
