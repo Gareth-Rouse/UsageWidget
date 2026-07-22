@@ -87,6 +87,29 @@ PlasmoidItem {
         return provider.windows.length > 0 ? provider.windows[0] : undefined
     }
 
+    // The rolling 5-hour window of a provider, or undefined when absent.
+    function fiveHourWindow(provider) {
+        if (!provider || !provider.ok || !provider.windows) return undefined
+        for (var i = 0; i < provider.windows.length; i++) {
+            if (provider.windows[i].id === "5h") return provider.windows[i]
+        }
+        return undefined
+    }
+
+    // Compact reset string for the panel: '26d' / '3h' / '12m' / '' (null).
+    function fmtResetShort(ms) {
+        if (ms === null || ms === undefined || typeof ms !== "number" || isNaN(ms)) return ""
+        var delta = ms - Date.now()
+        if (delta <= 0) return "now"
+        var totalMin = Math.floor(delta / 60000)
+        var days = Math.floor(totalMin / 1440)
+        var hours = Math.floor((totalMin % 1440) / 60)
+        var mins = totalMin % 60
+        if (days >= 1) return days + "d"
+        if (hours >= 1) return hours + "h"
+        return Math.max(1, mins) + "m"
+    }
+
     // Build a window list with an isDefault flag baked in (avoids needing
     // cross-delegate id access from nested Repeaters).
     function windowRows(provider) {
@@ -372,39 +395,60 @@ PlasmoidItem {
         }
     }
 
-    // A single compact segment: code letter + default-window percent.
+    // A compact segment per provider: letter + primary %, the 5-hour usage as a
+    // second number, and the primary window's reset time below.
     Component {
         id: segmentDelegateComp
 
-        RowLayout {
+        ColumnLayout {
             id: seg
             required property var modelData
-            spacing: 1
+            spacing: 0
             Layout.alignment: Qt.AlignVCenter | Qt.AlignHCenter
 
-            readonly property var provider: root.findProvider(modelData)
-            readonly property var win: root.defaultWindow(provider)
+            readonly property var provider: root.findProvider(seg.modelData)
+            readonly property var win: root.defaultWindow(seg.provider)
+            readonly property var five: root.fiveHourWindow(seg.provider)
+            readonly property bool bad: !root.loading && (!seg.provider || seg.provider.ok === false)
 
-            PlasmaComponents.Label {
-                text: root.providerCodes[modelData] || "?"
-                color: (seg.provider && seg.provider.ok === false)
-                       ? Kirigami.Theme.disabledTextColor
-                       : Kirigami.Theme.textColor
-                font.bold: true
+            // Primary line: letter + primary % + 5-hour %.
+            RowLayout {
+                spacing: 2
+                Layout.alignment: Qt.AlignHCenter
+
+                PlasmaComponents.Label {
+                    text: root.providerCodes[seg.modelData] || "?"
+                    color: seg.bad ? Kirigami.Theme.disabledTextColor : Kirigami.Theme.textColor
+                    font.bold: true
+                }
+                PlasmaComponents.Label {
+                    text: {
+                        if (root.loading) return "…"
+                        if (seg.bad || !seg.win) return "?"
+                        return Math.round(seg.win.usedPercent || 0) + "%"
+                    }
+                    color: (root.loading || seg.bad || !seg.win)
+                           ? Kirigami.Theme.disabledTextColor
+                           : root.usedColor(seg.win.usedPercent || 0, true)
+                    font.bold: true
+                }
+                PlasmaComponents.Label {
+                    visible: !root.loading && !seg.bad
+                    text: seg.five ? ("5h " + Math.round(seg.five.usedPercent || 0) + "%") : "5h —"
+                    color: seg.five ? root.usedColor(seg.five.usedPercent || 0, true)
+                                    : Kirigami.Theme.disabledTextColor
+                    font.pixelSize: root.smallFontSize
+                }
             }
+
+            // Reset time of the primary window.
             PlasmaComponents.Label {
-                text: {
-                    if (root.loading) return "…"
-                    if (!seg.provider || seg.provider.ok === false) return "?"
-                    if (!seg.win) return "?"
-                    return Math.round(seg.win.usedPercent || 0) + "%"
-                }
-                color: {
-                    if (root.loading) return Kirigami.Theme.disabledTextColor
-                    if (!seg.provider || seg.provider.ok === false || !seg.win)
-                        return Kirigami.Theme.disabledTextColor
-                    return root.usedColor(seg.win.usedPercent || 0, true)
-                }
+                Layout.alignment: Qt.AlignHCenter
+                visible: !root.loading && !seg.bad && text !== ""
+                text: (seg.win && root.fmtResetShort(seg.win.resetsAt))
+                      ? ("⟳ " + root.fmtResetShort(seg.win.resetsAt)) : ""
+                color: Kirigami.Theme.disabledTextColor
+                font.pixelSize: root.smallFontSize
             }
         }
     }

@@ -167,16 +167,14 @@ def map_usage_windows(report, now_ms):
     return windows
 
 
-def openai_default_window(windows):
-    for w in windows:
-        if FIVE_HOUR_RE.search(w["id"]) or FIVE_HOUR_RE.search(w["label"]):
-            return w["id"]
-    return windows[0]["id"] if windows else ""
+def long_default_window(windows):
+    """Primary = first window that is NOT the rolling 5h window.
 
-
-def anthropic_default_window(windows):
+    The 5h window is surfaced separately as the compact widget's second
+    number, so the headline defaults to the longer-term window (7d / weekly).
+    """
     for w in windows:
-        if w["id"] == "5h":
+        if not (FIVE_HOUR_RE.search(w["id"]) or FIVE_HOUR_RE.search(w["label"])):
             return w["id"]
     return windows[0]["id"] if windows else ""
 
@@ -212,16 +210,15 @@ def main():
     reports = usage_data.get("reports", []) if usage_data else []
 
     for key, label, prov_name, default_fn, missing_msg in (
-        ("openai", "OpenAI", "openai-codex", openai_default_window,
+        ("openai", "OpenAI", "openai-codex", long_default_window,
          "no openai-codex usage"),
-        ("anthropic", "Anthropic", "anthropic", anthropic_default_window,
+        ("anthropic", "Anthropic", "anthropic", long_default_window,
          "no anthropic usage"),
     ):
         report = None if usage_error else find_report(reports, prov_name)
         if usage_error or report is None:
             providers.append(provider_err(
-                key, label,
-                "5h" if key == "anthropic" else "",
+                key, label, "",
                 usage_error or missing_msg))
         else:
             windows = map_usage_windows(report, now_ms)
