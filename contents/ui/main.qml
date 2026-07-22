@@ -4,7 +4,6 @@ import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.plasma.plasma5support as P5Support
-import org.kde.quickcharts as Charts
 import org.kde.kirigami as Kirigami
 
 PlasmoidItem {
@@ -113,8 +112,9 @@ PlasmoidItem {
         return root.fiveHourWindow(provider)
     }
 
-    // Compact reset string for the panel: '26d' / '3h' / '12m' / '' (null).
-    function fmtResetShort(ms) {
+    // Compact time-to-reset for the panel, hours + minutes:
+    // '26d 4h' / '3h 25m' / '12m' / 'now' / '' (null).
+    function fmtResetHM(ms) {
         if (ms === null || ms === undefined || typeof ms !== "number" || isNaN(ms)) return ""
         var delta = ms - Date.now()
         if (delta <= 0) return "now"
@@ -122,8 +122,8 @@ PlasmoidItem {
         var days = Math.floor(totalMin / 1440)
         var hours = Math.floor((totalMin % 1440) / 60)
         var mins = totalMin % 60
-        if (days >= 1) return days + "d"
-        if (hours >= 1) return hours + "h"
+        if (days >= 1) return days + "d " + hours + "h"
+        if (hours >= 1) return hours + "h " + mins + "m"
         return Math.max(1, mins) + "m"
     }
 
@@ -365,109 +365,86 @@ PlasmoidItem {
     }
 
     // ------------------------------------------------------------------
-    // Compact representation: an active usage graph (an area line per
-    // provider, 0-100%) with small value labels stacked down the right.
+    // Compact representation: numeric per-provider remaining % plus the
+    // time until reset (hours + minutes). Adapts to panel orientation.
     // ------------------------------------------------------------------
-    readonly property var providerColors: ({
-        "synthetic": "#a679d2",
-        "openai": "#19c37d",
-        "anthropic": "#e08d5b"
-    })
-
-    // Current default-window used-percent for a provider (0 when absent).
-    function providerPct(key) {
-        var w = root.defaultWindow(root.findProvider(key))
-        return (w && typeof w.usedPercent === "number" && !isNaN(w.usedPercent))
-               ? w.usedPercent : 0
-    }
-
     compactRepresentation: Item {
         id: compactRoot
         readonly property bool horizontal: Plasmoid.formFactor === PlasmaCore.Types.Horizontal
 
-        // Natural size: give the graph room; thickness comes from the panel.
-        implicitWidth: horizontal ? Math.round(height * 2.6)
-                                  : Kirigami.Units.gridUnit * 4
-        implicitHeight: horizontal ? Kirigami.Units.gridUnit * 2
-                                   : Kirigami.Units.gridUnit * 4
+        // Report the content's natural size so the panel allocates space.
+        implicitWidth: compactLoader.item ? compactLoader.item.implicitWidth : height * 3
+        implicitHeight: compactLoader.item ? compactLoader.item.implicitHeight : Kirigami.Units.gridUnit * 2
         Layout.preferredWidth: implicitWidth
         Layout.preferredHeight: implicitHeight
 
-        readonly property int labelPx: Math.max(8, Math.round(
-            (horizontal ? height : Kirigami.Units.gridUnit * 4) / 3.6))
+        // Two stacked rows per segment must fit inside the panel cell.
+        readonly property int primaryPx: Math.max(8, Math.round(horizontal ? height * 0.46 : Kirigami.Units.gridUnit * 0.85))
+        readonly property int secondPx: Math.max(7, Math.round(primaryPx * 0.8))
 
-        // Animated area graph: one line per provider.
-        Charts.LineChart {
-            id: chart
+        Loader {
+            id: compactLoader
             anchors.fill: parent
-            smooth: true
-            fillOpacity: 0.25
-            yRange {
-                from: 0
-                to: 100
-                automatic: false
-            }
-            colorSource: Charts.ArraySource {
-                array: [
-                    root.providerColors["synthetic"],
-                    root.providerColors["openai"],
-                    root.providerColors["anthropic"]
-                ]
-            }
-            valueSources: [
-                Charts.HistoryProxySource {
-                    maximumHistory: 40
-                    interval: Math.max(1000, root.refreshMs)
-                    source: Charts.SingleValueSource { value: root.providerPct("synthetic") }
-                },
-                Charts.HistoryProxySource {
-                    maximumHistory: 40
-                    interval: Math.max(1000, root.refreshMs)
-                    source: Charts.SingleValueSource { value: root.providerPct("openai") }
-                },
-                Charts.HistoryProxySource {
-                    maximumHistory: 40
-                    interval: Math.max(1000, root.refreshMs)
-                    source: Charts.SingleValueSource { value: root.providerPct("anthropic") }
-                }
-            ]
-        }
-
-        // Small value labels stacked down the right-hand side.
-        Column {
-            anchors.top: parent.top
-            anchors.right: parent.right
-            anchors.margins: 2
-            spacing: -1
-
-            Repeater {
-                model: root.providerOrder
-                delegate: PlasmaComponents.Label {
-                    required property var modelData
-                    readonly property var provider: root.findProvider(modelData)
-                    readonly property var win: root.defaultWindow(provider)
-                    readonly property bool bad: !root.loading && (!provider || provider.ok === false)
-
-                    horizontalAlignment: Text.AlignRight
-                    font.pixelSize: compactRoot.labelPx
-                    font.bold: false
-                    color: "white"
-                    style: Text.Outline
-                    styleColor: Qt.rgba(0, 0, 0, 0.6)
-                    text: {
-                        var code = root.providerCodes[modelData] || "?"
-                        if (root.loading) return code + " …"
-                        if (bad || !win) return code + " ?"
-                        return code + " " + Math.round(win.usedPercent || 0) + "%"
-                    }
-                }
-            }
+            sourceComponent: compactRoot.horizontal ? rowComp : columnComp
         }
 
         MouseArea {
             anchors.fill: parent
             hoverEnabled: false
             onClicked: plasmoid.expanded = !plasmoid.expanded
+        }
+
+        Component {
+            id: rowComp
+            RowLayout {
+                spacing: Kirigami.Units.smallSpacing * 2
+                Repeater { model: root.providerOrder; delegate: segmentDelegateComp }
+            }
+        }
+
+        Component {
+            id: columnComp
+            ColumnLayout {
+                spacing: 0
+                Repeater { model: root.providerOrder; delegate: segmentDelegateComp }
+            }
+        }
+
+        // Per provider: remaining % on top, time-to-reset (h + m) below.
+        Component {
+            id: segmentDelegateComp
+
+            ColumnLayout {
+                id: seg
+                required property var modelData
+                spacing: 0
+                Layout.alignment: Qt.AlignVCenter | Qt.AlignHCenter
+
+                readonly property var provider: root.findProvider(seg.modelData)
+                readonly property var win: root.defaultWindow(seg.provider)
+                readonly property bool bad: !root.loading && (!seg.provider || seg.provider.ok === false)
+
+                PlasmaComponents.Label {
+                    Layout.alignment: Qt.AlignHCenter
+                    font.pixelSize: compactRoot.primaryPx
+                    font.bold: false
+                    color: Kirigami.Theme.textColor
+                    text: {
+                        var code = root.providerCodes[seg.modelData] || "?"
+                        if (root.loading) return code + " …"
+                        if (seg.bad || !seg.win) return code + " ?"
+                        return code + " " + Math.max(0, 100 - Math.round(seg.win.usedPercent || 0)) + "%"
+                    }
+                }
+                PlasmaComponents.Label {
+                    Layout.alignment: Qt.AlignHCenter
+                    visible: !root.loading && !seg.bad && text !== ""
+                    font.pixelSize: compactRoot.secondPx
+                    font.bold: false
+                    color: Kirigami.Theme.textColor
+                    text: seg.win ? root.fmtResetHM(seg.win.resetsAt) : ""
+                }
+            }
         }
     }
 
