@@ -195,6 +195,7 @@ PlasmoidItem {
 
                 delegate: ColumnLayout {
                     id: providerColumn
+                    required property var modelData
                     Layout.fillWidth: true
                     spacing: Kirigami.Units.smallSpacing
 
@@ -235,6 +236,7 @@ PlasmoidItem {
 
                         delegate: ColumnLayout {
                             id: winColumn
+                            required property var modelData
                             Layout.fillWidth: true
                             spacing: 0
 
@@ -391,6 +393,7 @@ PlasmoidItem {
 
         RowLayout {
             id: seg
+            required property var modelData
             spacing: 1
             Layout.alignment: Qt.AlignVCenter | Qt.AlignHCenter
 
