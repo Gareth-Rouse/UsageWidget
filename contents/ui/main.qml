@@ -1,5 +1,3 @@
-pragma ComponentBehavior: Bound
-
 import QtQuick
 import QtQuick.Layouts
 import org.kde.plasma.plasmoid
@@ -117,29 +115,19 @@ PlasmoidItem {
     P5Support.DataSource {
         id: executable
         engine: "executable"
-        // We connect/disconnect sources manually (executable fires once per
-        // connectSource), so never keep a persistent connectedSources list.
-
+        // Executable engine fires once per connectSource; disconnect after each
+        // result and re-arm the poll timer for the next refresh.
         onNewData: (sourceName, data) => {
             executable.disconnectSource(sourceName)
-            if (!data) {
-                root.stale = true
-                root.scheduleNext()
-                return
-            }
-            var stdout = data.stdout
-            if (stdout === undefined || stdout === "") {
-                root.stale = true
-                root.scheduleNext()
-                return
-            }
-            try {
-                var parsed = JSON.parse(stdout)
-                root.model = parsed
-                root.loading = false
-                root.stale = false
-            } catch (e) {
-                // Keep last good model; mark stale.
+            if (data && data.stdout !== undefined && data.stdout !== "") {
+                try {
+                    root.model = JSON.parse(data.stdout)
+                    root.loading = false
+                    root.stale = false
+                } catch (e) {
+                    root.stale = true
+                }
+            } else {
                 root.stale = true
             }
             root.scheduleNext()
@@ -163,10 +151,7 @@ PlasmoidItem {
         pollTimer.restart()
     }
 
-    Component.onCompleted: {
-        // Kick off the first fetch immediately.
-        fetch()
-    }
+    Component.onCompleted: fetch()
 
     // ------------------------------------------------------------------
     // Shared detail layout (tooltip + full representation)
