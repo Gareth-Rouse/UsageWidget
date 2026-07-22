@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<kcfg xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0
+                          http://www.kde.org/standards/kcfg/1.0/kcfg.xsd"
+      xmlns="http://www.kde.org/standards/kcfg/1.0">
+    <kcfgfile name=""/>
+    <group name="General">
+        <entry name="refreshSeconds" type="Int">
+            <label>Refresh interval in seconds</label>
+            <default>300</default>
+            <min>30</min>
+            <max>86400</max>
+        </entry>
+    </group>
+</kcfg>

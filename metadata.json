@@ -1,0 +1,14 @@
+{
+  "KPackageStructure": "Plasma/Applet",
+  "KPlugin": {
+    "Id": "com.gar.ompusage",
+    "Name": "OMP Usage",
+    "Description": "Current synthetic / OpenAI / Anthropic usage on the panel",
+    "Icon": "utilities-system-monitor",
+    "Category": "System Information",
+    "Authors": [{ "Name": "Gar" }],
+    "Version": "1.0",
+    "License": "MIT"
+  },
+  "X-Plasma-API-Minimum-Version": "6.0"
+}
