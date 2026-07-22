@@ -379,8 +379,8 @@ PlasmoidItem {
         Layout.preferredHeight: implicitHeight
 
         // Two stacked rows per segment must fit inside the panel cell.
-        readonly property int primaryPx: Math.max(8, Math.round(horizontal ? height * 0.46 : Kirigami.Units.gridUnit * 0.85))
-        readonly property int secondPx: Math.max(7, Math.round(primaryPx * 0.8))
+        readonly property int primaryPx: Math.max(7, Math.round(horizontal ? height * 0.38 : Kirigami.Units.gridUnit * 0.72))
+        readonly property int secondPx: Math.max(6, Math.round(primaryPx * 0.8))
 
         Loader {
             id: compactLoader
