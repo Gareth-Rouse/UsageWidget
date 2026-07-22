@@ -438,17 +438,11 @@ PlasmoidItem {
             readonly property var second: root.secondaryWindow(seg.provider)
             readonly property bool bad: !root.loading && (!seg.provider || seg.provider.ok === false)
 
-            // Primary line: letter + primary % + 5-hour %.
+            // Top line: primary % + secondary %.
             RowLayout {
                 spacing: Kirigami.Units.smallSpacing
                 Layout.alignment: Qt.AlignHCenter
 
-                PlasmaComponents.Label {
-                    text: root.providerCodes[seg.modelData] || "?"
-                    color: seg.bad ? Kirigami.Theme.disabledTextColor : Kirigami.Theme.textColor
-                    font.bold: true
-                    font.pixelSize: compactRoot.primaryPx
-                }
                 PlasmaComponents.Label {
                     text: {
                         if (root.loading) return "…"
@@ -472,14 +466,24 @@ PlasmoidItem {
                 }
             }
 
-            // Reset time of the primary window.
-            PlasmaComponents.Label {
+            // Bottom line: provider letter + primary-window reset.
+            RowLayout {
+                spacing: Kirigami.Units.smallSpacing
                 Layout.alignment: Qt.AlignHCenter
-                visible: !root.loading && !seg.bad && text !== ""
-                text: (seg.win && root.fmtResetShort(seg.win.resetsAt))
-                      ? ("⟳ " + root.fmtResetShort(seg.win.resetsAt)) : ""
-                color: Kirigami.Theme.disabledTextColor
-                font.pixelSize: compactRoot.secondPx
+
+                PlasmaComponents.Label {
+                    text: root.providerCodes[seg.modelData] || "?"
+                    color: seg.bad ? Kirigami.Theme.disabledTextColor : Kirigami.Theme.textColor
+                    font.bold: true
+                    font.pixelSize: compactRoot.secondPx
+                }
+                PlasmaComponents.Label {
+                    visible: !root.loading && !seg.bad && text !== ""
+                    text: (seg.win && root.fmtResetShort(seg.win.resetsAt))
+                          ? ("⟳ " + root.fmtResetShort(seg.win.resetsAt)) : ""
+                    color: Kirigami.Theme.disabledTextColor
+                    font.pixelSize: compactRoot.secondPx
+                }
             }
         }
     }

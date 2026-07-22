@@ -7,7 +7,7 @@
     "Icon": "utilities-system-monitor",
     "Category": "System Information",
     "Authors": [{ "Name": "Gar" }],
-    "Version": "1.5",
+    "Version": "1.6",
     "License": "MIT"
   },
   "X-Plasma-API-Minimum-Version": "6.0"
