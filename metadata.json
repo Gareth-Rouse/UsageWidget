@@ -3,11 +3,11 @@
   "KPlugin": {
     "Id": "com.gar.ompusage",
     "Name": "OMP Usage",
-    "Description": "Current synthetic / OpenAI / Anthropic usage on the panel",
+    "Description": "Per-provider OMP usage on the panel, with selectable providers and windows",
     "Icon": "utilities-system-monitor",
     "Category": "System Information",
     "Authors": [{ "Name": "Gar" }],
-    "Version": "2.0",
+    "Version": "3.0",
     "License": "MIT"
   },
   "X-Plasma-API-Minimum-Version": "6.0"

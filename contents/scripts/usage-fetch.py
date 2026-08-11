@@ -3,6 +3,11 @@
 
 Emits a single unified usage JSON object on stdout (see local contract) and
 exits 0 even on partial failure: per-provider ``ok``/``error`` carry failures.
+
+Every provider reported by ``omp usage --json`` is emitted; the widget itself
+decides which providers and which window to show. ``synthetic`` is replaced by
+a richer direct quotas fetch (it exposes the monthly credit pool, which the
+omp report does not).
 """
 import json
 import re
@@ -14,6 +19,24 @@ from datetime import datetime
 
 SYNTHETIC_URL = "https://api.synthetic.new/v2/quotas"
 FIVE_HOUR_RE = re.compile(r"5\s*h|5 hour", re.IGNORECASE)
+
+# Pretty names / compact panel codes for the providers we know about. Unknown
+# providers fall back to a derived label and first-letter code.
+PROVIDER_LABELS = {
+    "synthetic": "Synthetic",
+    "openai-codex": "OpenAI",
+    "anthropic": "Anthropic",
+    "google-antigravity": "Antigravity",
+    "github-copilot": "Copilot",
+}
+PROVIDER_CODES = {
+    "synthetic": "S",
+    "openai-codex": "O",
+    "anthropic": "A",
+    "google-antigravity": "G",
+    "github-copilot": "C",
+}
+
 
 
 def iso_to_ms(iso_str):
@@ -34,33 +57,37 @@ def safe_pct(num, den):
     return round1(num / den * 100.0)
 
 
-def relative(resets_at_ms, now_ms):
-    diff = resets_at_ms - now_ms
-    if diff <= 0:
-        return "now"
-    secs = diff / 1000.0
-    if secs >= 86400:
-        return "in {}d".format(round(secs / 86400))
-    if secs >= 3600:
-        return "in {}h".format(round(secs / 3600))
-    if secs >= 60:
-        return "in {}m".format(round(secs / 60))
-    return "in {}s".format(round(secs))
+def provider_label(key):
+    return PROVIDER_LABELS.get(key) or key.replace("-", " ").title()
 
 
-def provider_err(key, label, default_window_id, error):
+def provider_code(key, taken):
+    """Single-letter panel code, widened on collision (S, SY, SYN…)."""
+    code = PROVIDER_CODES.get(key)
+    if code and code not in taken:
+        return code
+    stem = re.sub(r"[^a-z]", "", key.lower()) or "?"
+    for n in range(1, len(stem) + 1):
+        cand = stem[:n].upper()
+        if cand not in taken:
+            return cand
+    return stem.upper()
+
+
+def provider_err(key, label, error):
     return {
         "key": key,
         "label": label,
+        "code": "",
         "ok": False,
         "error": str(error),
-        "defaultWindowId": default_window_id,
+        "defaultWindowId": "",
         "windows": [],
     }
 
 
-def fetch_synthetic(now_ms):
-    # bearer key from omp token synthetic
+def fetch_synthetic():
+    """Synthetic quotas straight from the API (richer than the omp report)."""
     key = None
     error = None
     try:
@@ -74,9 +101,8 @@ def fetch_synthetic(now_ms):
     except Exception as exc:  # noqa: BLE001 - surface any subprocess failure
         error = str(exc)
     if error:
-        return provider_err("synthetic", "Synthetic", "monthly", error)
+        return provider_err("synthetic", "Synthetic", error)
 
-    # quotas
     try:
         req = urllib.request.Request(
             SYNTHETIC_URL, headers={"Authorization": "Bearer " + key}
@@ -84,7 +110,7 @@ def fetch_synthetic(now_ms):
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except Exception as exc:  # noqa: BLE001
-        return provider_err("synthetic", "Synthetic", "monthly", str(exc))
+        return provider_err("synthetic", "Synthetic", str(exc))
 
     windows = []
 
@@ -102,7 +128,7 @@ def fetch_synthetic(now_ms):
             wk.get("remainingCredits", "?"), wk.get("maxCredits", "?")),
     })
 
-    # requests <- subscription request counter (kept for the tooltip)
+    # requests <- subscription request counter
     sub = data.get("subscription", {})
     m_requests = sub.get("requests", 0)
     m_limit = sub.get("limit", 0)
@@ -129,6 +155,7 @@ def fetch_synthetic(now_ms):
     return {
         "key": "synthetic",
         "label": "Synthetic",
+        "code": "",
         "ok": True,
         "error": None,
         "defaultWindowId": "monthly",
@@ -136,14 +163,35 @@ def fetch_synthetic(now_ms):
     }
 
 
-def map_usage_windows(report, now_ms):
-    """Map an omp-usage report's limits[] to window objects."""
+def map_usage_windows(report):
+    """Map an omp-usage report's limits[] to window objects.
+
+    The window id is the *limit* id, because several limits of one provider can
+    share a window id (anthropic has two distinct 7d limits). Labels prefer the
+    limit label and only fall back to appending the window label when two
+    limits of the same provider would otherwise be indistinguishable.
+    """
+    limits = report.get("limits", []) or []
+    label_counts = {}
+    for lim in limits:
+        base = lim.get("label") or (lim.get("window", {}) or {}).get("label") or ""
+        label_counts[base] = label_counts.get(base, 0) + 1
+
     windows = []
-    for lim in report.get("limits", []):
+    seen_ids = set()
+    for idx, lim in enumerate(limits):
         win = lim.get("window", {}) or {}
         amount = lim.get("amount", {}) or {}
-        wid = win.get("id") or lim.get("id") or ""
-        wlabel = win.get("label") or lim.get("label") or ""
+
+        wid = lim.get("id") or win.get("id") or "w{}".format(idx)
+        while wid in seen_ids:
+            wid = "{}#{}".format(wid, idx)
+        seen_ids.add(wid)
+
+        base = lim.get("label") or win.get("label") or wid
+        wlabel = base
+        if label_counts.get(base, 0) > 1 and win.get("label"):
+            wlabel = "{} · {}".format(base, win.get("label"))
 
         used_fraction = amount.get("usedFraction")
         if used_fraction is not None:
@@ -169,11 +217,12 @@ def map_usage_windows(report, now_ms):
     return windows
 
 
-def five_hour_default_window(windows):
+def pick_default_window(windows):
     """Primary = the rolling 5h window when present, else the first window.
 
-    OpenAI/Anthropic headline the short-term 5-hour burn; the longer window is
-    surfaced as the compact widget's second number.
+    OpenAI/Anthropic headline the short-term 5-hour burn; longer windows are
+    still selectable from the widget's configuration page. Runs on the sorted
+    window list so the pick does not drift between refreshes.
     """
     for w in windows:
         if FIVE_HOUR_RE.search(w["id"]) or FIVE_HOUR_RE.search(w["label"]):
@@ -181,18 +230,12 @@ def five_hour_default_window(windows):
     return windows[0]["id"] if windows else ""
 
 
-def find_report(reports, name):
-    for r in reports:
-        if r.get("provider") == name:
-            return r
-    return None
 
 
 def main():
     now_ms = int(time.time() * 1000)
-    providers = [fetch_synthetic(now_ms)]
+    providers = [fetch_synthetic()]
 
-    # omp usage --json invoked once for both openai + anthropic
     usage_data = None
     usage_error = None
     try:
@@ -211,33 +254,54 @@ def main():
 
     reports = usage_data.get("reports", []) if usage_data else []
 
-    for key, label, prov_name, default_fn, missing_msg in (
-        ("openai", "OpenAI", "openai-codex", five_hour_default_window,
-         "no openai-codex usage"),
-        ("anthropic", "Anthropic", "anthropic", five_hour_default_window,
-         "no anthropic usage"),
-    ):
-        report = None if usage_error else find_report(reports, prov_name)
-        if usage_error or report is None:
-            providers.append(provider_err(
-                key, label, "",
-                usage_error or missing_msg))
-        else:
-            windows = map_usage_windows(report, now_ms)
+    if usage_error:
+        # Keep the two staples visible with their error, so the panel explains
+        # itself instead of silently dropping providers.
+        for key in ("openai-codex", "anthropic"):
+            providers.append(provider_err(key, provider_label(key), usage_error))
+    else:
+        for report in reports:
+            key = report.get("provider") or ""
+            if not key or key == "synthetic":
+                continue  # synthetic comes from the direct quotas fetch above
+            if report.get("error"):
+                providers.append(
+                    provider_err(key, provider_label(key), report["error"]))
+                continue
+            windows = map_usage_windows(report)
             providers.append({
                 "key": key,
-                "label": label,
+                "label": provider_label(key),
+                "code": "",
                 "ok": True,
                 "error": None,
-                "defaultWindowId": default_fn(windows),
+                "defaultWindowId": "",
                 "windows": windows,
             })
 
-    print(json.dumps({
+    # omp does not guarantee report/limit ordering; sort so the panel segments
+    # and the config rows keep a fixed position between refreshes. Synthetic
+    # stays first because it is the local, always-present provider.
+    head = providers[:1]
+    tail = sorted(providers[1:], key=lambda p: p["key"])
+    providers = head + tail
+    for prov in providers:
+        prov["windows"].sort(key=lambda w: w["id"])
+        if not prov["defaultWindowId"]:
+            prov["defaultWindowId"] = pick_default_window(prov["windows"])
+
+    taken = set()
+    for prov in providers:
+        prov["code"] = provider_code(prov["key"], taken)
+        taken.add(prov["code"])
+
+    payload = {
         "generatedAt": now_ms,
         "ok": True,
         "providers": providers,
-    }))
+    }
+
+    print(json.dumps(payload))
 
 
 if __name__ == "__main__":

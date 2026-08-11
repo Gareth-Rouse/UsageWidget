@@ -11,5 +11,13 @@
             <min>30</min>
             <max>86400</max>
         </entry>
+        <entry name="enabledProviders" type="String">
+            <label>Comma-separated provider keys to show; empty shows all</label>
+            <default></default>
+        </entry>
+        <entry name="windowSelections" type="String">
+            <label>Comma-separated providerKey=windowId choices</label>
+            <default></default>
+        </entry>
     </group>
 </kcfg>

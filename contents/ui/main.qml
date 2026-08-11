@@ -29,9 +29,43 @@ PlasmoidItem {
         }
     }
 
-    // Compact short codes for the three providers, in fixed order.
-    readonly property var providerOrder: ["synthetic", "openai", "anthropic"]
-    readonly property var providerCodes: ({ "synthetic": "S", "openai": "O", "anthropic": "A" })
+    // ------------------------------------------------------------------
+    // Configuration-derived view state
+    // ------------------------------------------------------------------
+    // Comma-separated provider keys; empty means "everything the fetch reports".
+    readonly property var enabledProviders: {
+        var raw = (Plasmoid.configuration.enabledProviders || "").trim()
+        if (raw === "") return []
+        return raw.split(",")
+                  .map(function (s) { return s.trim() })
+                  .filter(function (s) { return s !== "" })
+    }
+
+    // "providerKey=windowId" pairs -> { providerKey: windowId }
+    readonly property var windowSelections: {
+        var map = ({})
+        var parts = (Plasmoid.configuration.windowSelections || "").split(",")
+        for (var i = 0; i < parts.length; i++) {
+            var eq = parts[i].indexOf("=")
+            if (eq <= 0) continue
+            map[parts[i].slice(0, eq).trim()] = parts[i].slice(eq + 1).trim()
+        }
+        return map
+    }
+
+    // Provider keys to render, in payload order, filtered by configuration.
+    readonly property var providerOrder: {
+        var out = []
+        var providers = root.model && root.model.providers ? root.model.providers : []
+        for (var i = 0; i < providers.length; i++) {
+            var key = providers[i].key
+            if (root.enabledProviders.length === 0
+                    || root.enabledProviders.indexOf(key) >= 0) {
+                out.push(key)
+            }
+        }
+        return out
+    }
 
     readonly property int smallFontSize: Math.round(Kirigami.Units.gridUnit * 0.75)
 
@@ -77,39 +111,34 @@ PlasmoidItem {
         return undefined
     }
 
-    // The default window of a provider, or undefined.
-    function defaultWindow(provider) {
+    // Window id shown for a provider: the configured choice while it still
+    // exists in the payload, otherwise the payload's own default.
+    function selectedWindowId(provider) {
+        if (!provider) return ""
+        var chosen = root.windowSelections[provider.key]
+        if (chosen && provider.windows) {
+            for (var i = 0; i < provider.windows.length; i++) {
+                if (provider.windows[i].id === chosen) return chosen
+            }
+        }
+        return provider.defaultWindowId
+    }
+
+    // The window object shown for a provider, or undefined.
+    function selectedWindow(provider) {
         if (!provider || !provider.ok || !provider.windows) return undefined
-        var dwid = provider.defaultWindowId
+        var wid = root.selectedWindowId(provider)
         for (var i = 0; i < provider.windows.length; i++) {
-            if (provider.windows[i].id === dwid) return provider.windows[i]
+            if (provider.windows[i].id === wid) return provider.windows[i]
         }
         return provider.windows.length > 0 ? provider.windows[0] : undefined
     }
 
-    // The rolling 5-hour window of a provider, or undefined when absent.
-    function fiveHourWindow(provider) {
-        if (!provider || !provider.ok || !provider.windows) return undefined
-        for (var i = 0; i < provider.windows.length; i++) {
-            if (provider.windows[i].id === "5h") return provider.windows[i]
-        }
-        return undefined
-    }
-
-    // The complementary window shown as the compact second number: when the
-    // primary is the 5h window, this is the first non-5h window; otherwise it
-    // is the 5h window. Undefined when there is nothing sensible to pair.
-    function secondaryWindow(provider) {
-        if (!provider || !provider.ok || !provider.windows) return undefined
-        var prim = root.defaultWindow(provider)
-        var primId = prim ? prim.id : ""
-        if (primId === "5h") {
-            for (var i = 0; i < provider.windows.length; i++) {
-                if (provider.windows[i].id !== "5h") return provider.windows[i]
-            }
-            return undefined
-        }
-        return root.fiveHourWindow(provider)
+    // Compact panel code for a provider key ('S', 'O', …).
+    function providerCode(key) {
+        var p = root.findProvider(key)
+        if (p && p.code) return p.code
+        return key ? key.charAt(0).toUpperCase() : "?"
     }
 
     // Compact time-to-reset for the panel, hours + minutes:
@@ -127,11 +156,11 @@ PlasmoidItem {
         return Math.max(1, mins) + "m"
     }
 
-    // Build a window list with an isDefault flag baked in (avoids needing
+    // Build a window list with an isSelected flag baked in (avoids needing
     // cross-delegate id access from nested Repeaters).
     function windowRows(provider) {
         if (!provider || !provider.ok || !provider.windows) return []
-        var dwid = provider.defaultWindowId
+        var wid = root.selectedWindowId(provider)
         return provider.windows.map(function (w) {
             return {
                 id: w.id,
@@ -139,7 +168,7 @@ PlasmoidItem {
                 usedPercent: w.usedPercent,
                 resetsAt: w.resetsAt,
                 detail: w.detail,
-                isDefault: (w.id === dwid)
+                isSelected: (w.id === wid)
             }
         })
     }
@@ -268,7 +297,7 @@ PlasmoidItem {
                                 spacing: Kirigami.Units.smallSpacing
 
                                 PlasmaComponents.Label {
-                                    text: modelData.isDefault ? "●" : " "
+                                    text: modelData.isSelected ? "●" : " "
                                     color: Kirigami.Theme.textColor
                                     Layout.alignment: Qt.AlignTop
                                 }
@@ -353,6 +382,17 @@ PlasmoidItem {
                 }
             }
 
+            // Everything hidden by configuration: say so instead of showing
+            // just the timestamp.
+            PlasmaComponents.Label {
+                Layout.fillWidth: true
+                visible: !root.loading && root.providerOrder.length === 0
+                text: "no providers selected — right-click → Configure OMP Usage"
+                font.pixelSize: root.smallFontSize
+                color: Kirigami.Theme.disabledTextColor
+                wrapMode: Text.Wrap
+            }
+
             // Stale / loading footer.
             PlasmaComponents.Label {
                 Layout.fillWidth: true
@@ -394,11 +434,28 @@ PlasmoidItem {
             onClicked: plasmoid.expanded = !plasmoid.expanded
         }
 
+        // Shown when no provider segment is renderable: before the first
+        // fetch lands, or when configuration hides every provider.
+        Component {
+            id: placeholderComp
+            PlasmaComponents.Label {
+                Layout.alignment: Qt.AlignVCenter | Qt.AlignHCenter
+                font.pixelSize: compactRoot.primaryPx
+                color: Kirigami.Theme.textColor
+                text: root.loading ? "…" : "OMP"
+            }
+        }
+
         Component {
             id: rowComp
             RowLayout {
                 spacing: Kirigami.Units.smallSpacing * 2
                 Repeater { model: root.providerOrder; delegate: segmentDelegateComp }
+                Loader {
+                    active: root.providerOrder.length === 0
+                    visible: active
+                    sourceComponent: placeholderComp
+                }
             }
         }
 
@@ -407,6 +464,11 @@ PlasmoidItem {
             ColumnLayout {
                 spacing: 0
                 Repeater { model: root.providerOrder; delegate: segmentDelegateComp }
+                Loader {
+                    active: root.providerOrder.length === 0
+                    visible: active
+                    sourceComponent: placeholderComp
+                }
             }
         }
 
@@ -421,7 +483,7 @@ PlasmoidItem {
                 Layout.alignment: Qt.AlignVCenter | Qt.AlignHCenter
 
                 readonly property var provider: root.findProvider(seg.modelData)
-                readonly property var win: root.defaultWindow(seg.provider)
+                readonly property var win: root.selectedWindow(seg.provider)
                 readonly property bool bad: !root.loading && (!seg.provider || seg.provider.ok === false)
 
                 PlasmaComponents.Label {
@@ -430,7 +492,7 @@ PlasmoidItem {
                     font.bold: false
                     color: Kirigami.Theme.textColor
                     text: {
-                        var code = root.providerCodes[seg.modelData] || "?"
+                        var code = root.providerCode(seg.modelData)
                         if (root.loading) return code + " …"
                         if (seg.bad || !seg.win) return code + " ?"
                         return code + " " + Math.max(0, 100 - Math.round(seg.win.usedPercent || 0)) + "%"

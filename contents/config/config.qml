@@ -1,20 +1,13 @@
-import org.kde.kcmutils as KCM
-import QtQuick.Controls
-import QtQuick.Layouts
+import QtQuick
+import org.kde.plasma.configuration
 
-KCM.SimpleKCM {
-    property alias cfg_refreshSeconds: spin.value
-
-    ColumnLayout {
-        RowLayout {
-            Label {
-                text: i18nc("@label", "Refresh interval (seconds)")
-            }
-            SpinBox {
-                id: spin
-                from: 30
-                to: 86400
-            }
-        }
+// Plasma reads this file as the *list of settings pages*, not as a page. The
+// actual UI lives in configGeneral.qml; without this model the applet only
+// gets the built-in Keyboard Shortcuts / About entries.
+ConfigModel {
+    ConfigCategory {
+        name: "General"
+        icon: "configure"
+        source: "configGeneral.qml"
     }
 }
